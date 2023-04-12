@@ -1,0 +1,5 @@
+14:40 2021/8/9
+1.fix jetson platfrom dma erros
+13:51 2021/7/21
+1.fix Interrupt crash errors.
+2.fix v4l2_open errors.
