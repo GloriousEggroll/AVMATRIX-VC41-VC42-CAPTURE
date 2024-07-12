@@ -3,6 +3,7 @@
 
 #include <linux/pci.h>
 #include <linux/kernel.h>
+#include <linux/string.h>
 #include <media/videobuf2-core.h>
 #include <media/v4l2-device.h>
 #include <media/videobuf2-dma-contig.h>
@@ -15,6 +16,16 @@
 #include <sound/pcm.h>
 #include <sound/rawmidi.h>
 #include <sound/initval.h>
+
+#ifndef HAVE_STRLCPY
+static size_t strlcpy(char *dst, const char *src, size_t size) {
+	size_t src_len = strlen(src);
+	size_t copy_len = (src_len >= size) ? size - 1 : src_len;
+	memcpy(dst, src, copy_len);
+	dst[copy_len] = '\0';
+	return src_len;
+}
+#endif
 
 static void hws_adapters_init(struct hws_pcie_dev *dev);
 static void hws_get_video_param(struct hws_pcie_dev *dev,int index);
@@ -3249,7 +3260,7 @@ int hws_video_register(struct hws_pcie_dev *dev)
 		q->io_modes = VB2_READ | VB2_MMAP | VB2_USERPTR;
 		//q->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF | VB2_READ;
 		q->gfp_flags = GFP_DMA32;
-		q->min_buffers_needed = 2;
+		q->min_queued_buffers = 2;
 		q->drv_priv = &(dev->video[i]);
 		q->buf_struct_size = sizeof(struct hwsvideo_buffer);
 		q->ops = &hwspcie_video_qops;
