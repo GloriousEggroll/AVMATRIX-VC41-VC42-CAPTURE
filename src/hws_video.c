@@ -90,7 +90,7 @@ static const v4l2_model_timing_t support_videofmt[]= {
 	[V4L2_MODEL_VIDEOFORMAT_1920X1080P60]	= V4L2_MODEL_TIMING(1920,1080,60,0),
 	[V4L2_MODEL_VIDEOFORMAT_1280X720P60]	= V4L2_MODEL_TIMING(1280,720,60,0),
 	[V4L2_MODEL_VIDEOFORMAT_720X480P60]		= V4L2_MODEL_TIMING(720,480,60,0),
-	[V4L2_MODEL_VIDEOFORMAT_720X576P50]		= V4L2_MODEL_TIMING(720,480,50,0),
+    [V4L2_MODEL_VIDEOFORMAT_720X576P50]		= V4L2_MODEL_TIMING(720,576,50,0),
 	[V4L2_MODEL_VIDEOFORMAT_800X600P60]		= V4L2_MODEL_TIMING(800,600,60,0),
 	[V4L2_MODEL_VIDEOFORMAT_1024X768P60]	= V4L2_MODEL_TIMING(1024,768,60,0),
 	[V4L2_MODEL_VIDEOFORMAT_1280X768P60]	= V4L2_MODEL_TIMING(1280,768,60,0),
@@ -99,8 +99,8 @@ static const v4l2_model_timing_t support_videofmt[]= {
 	[V4L2_MODEL_VIDEOFORMAT_1360X768P60]	= V4L2_MODEL_TIMING(1360,768,60,0),
 	[V4L2_MODEL_VIDEOFORMAT_1440X900P60]	= V4L2_MODEL_TIMING(1440,900,60,0),
 	[V4L2_MODEL_VIDEOFORMAT_1680X1050P60]	= V4L2_MODEL_TIMING(1680,1050,60,0),
-	[V4L2_MODEL_VIDEOFORMAT_1080X1920P60]	= V4L2_MODEL_TIMING(1080,1920,60,0),
 	#if 0
+    [V4L2_MODEL_VIDEOFORMAT_1080X1920P60]	= V4L2_MODEL_TIMING(1080,1920,60,0),
 	[V4L2_MODEL_VIDEOFORMAT_1920X1200P60]	= V4L2_MODEL_TIMING(1920,1200,60,0),
 	[V4L2_MODEL_VIDEOFORMAT_2560X1080P60]	= V4L2_MODEL_TIMING(2560,1080,60,0),
 	[V4L2_MODEL_VIDEOFORMAT_2560X1440P60]	= V4L2_MODEL_TIMING(2560,1440,60,0),
@@ -385,11 +385,29 @@ static int hws_vidioc_try_fmt_vid_cap(struct file *file, void *fh, struct v4l2_f
 	//int TimeingIndex = f->index;
 	//printk( "%s(%d)\n", __func__,videodev->index);
 	//printk( "pix->height =%d  pix->width =%d \n", pix->height,pix->width);
+
+    if (pix->pixelformat == 0) {
+        if (framegrabber_g_support_pixelfmt_by_fourcc(videodev->pixfmt))
+            pix->pixelformat = videodev->pixfmt;
+        else
+            pix->pixelformat = V4L2_PIX_FMT_YUYV;
+    }
+
 	fmt = framegrabber_g_support_pixelfmt_by_fourcc(pix->pixelformat);
 	if(!fmt)
 	{
-		printk("%s.. format not support \n",__func__);
-		return -EINVAL;
+        pix->pixelformat = V4L2_PIX_FMT_YUYV;
+        fmt = framegrabber_g_support_pixelfmt_by_fourcc(pix->pixelformat);
+        if (!fmt) {
+            printk("%s.. format not support (even fallback)\n", __func__);
+            return -EINVAL;
+        }
+	}
+	if (pix->width == 0 || pix->height == 0) {
+			pModeTiming = v4l2_model_get_support_videoformat(videodev->current_out_size_index);
+			if (!pModeTiming) return -EINVAL;
+			pix->width  = pModeTiming->frame_size.width;
+			pix->height = pModeTiming->frame_size.height;
 	}
 	pModeTiming = Get_input_framesizeIndex(pix->width,pix->height);
 	if(!pModeTiming)
@@ -430,6 +448,10 @@ static int vidioc_s_fmt_vid_cap(struct file *file, void *priv,struct v4l2_format
 	unsigned long flags;
 	struct hws_pcie_dev *pdx = videodev->dev;
 	//printk( "%s()\n", __func__);
+  err = hws_vidioc_try_fmt_vid_cap(file, priv, f);
+    if (err)
+        return err;
+
 	nVideoFmtIndex = v4l2_get_suport_VideoFormatIndex(f);
 	if(nVideoFmtIndex ==-1) return -EINVAL;
 
@@ -617,6 +639,10 @@ static int hws_open(struct file *file)
 	//v4l2_model_timing_t *p_SupportmodeTiming;
 	unsigned long flags;
 	struct hws_pcie_dev *pdx = videodev->dev;
+  int ret;
+  ret = v4l2_fh_open(file);
+    if (ret)
+        return ret;
 	//printk( "%s(ch-%d)->%d\n", __func__,videodev->index,videodev->fileindex);
 	spin_lock_irqsave(&pdx->videoslock[videodev->index], flags);
 	videodev->fileindex ++;
@@ -641,7 +667,7 @@ static int hws_release(struct file *file)
 
 	if(videodev->fileindex==0)
 	{
-		if(videodev->startstreamIndex >0)
+		if(videodev->startstreamIndex >0&& videodev->startstreamIndex > 0)
 		{
 			//printk( "StopVideoCapture %s(%d)->%d [%d]\n", __func__,videodev->index,videodev->fileindex,videodev->startstreamIndex);
 			StopVideoCapture(videodev->dev,videodev->index);
@@ -998,6 +1024,8 @@ static int hws_vidioc_enum_frameintervals(struct file *file, void *fh,
 	int FrameRate;
 	v4l2_model_timing_t * pModeTiming;
 	Index = fival->index;
+
+ 
 	//printk( "%s(CH-%d) FrameIndex =%d \n", __func__,videodev->index,Index);
 	if(Index <0 ||Index >=NUM_FRAMERATE_CONTROLS)
 	{
@@ -1009,9 +1037,39 @@ static int hws_vidioc_enum_frameintervals(struct file *file, void *fh,
 	pModeTiming = Get_input_framesizeIndex(fival->width,fival->height);
 	if(pModeTiming == NULL) return -EINVAL;
 
+	#if 0
 	fival->type = V4L2_FRMIVAL_TYPE_DISCRETE;
 	fival->discrete.numerator=1000 ;
 	fival->discrete.denominator=FrameRate*1000;
+	#else
+		fival->type = V4L2_FRMIVAL_TYPE_DISCRETE;
+	if (fival->width == 720 && fival->height == 576) {
+		/* just show  25/50 */
+		if (fival->index == 0) {
+			fival->discrete.numerator = 1;
+			fival->discrete.denominator = 25;
+			return 0;
+		} else if (fival->index == 1) {
+			fival->discrete.numerator = 1;
+			fival->discrete.denominator = 50;
+			return 0;
+		}
+		return -EINVAL;
+	} else {
+		/* ohter  30/60 */
+		if (fival->index == 0) {
+			fival->discrete.numerator = 1;
+			fival->discrete.denominator = 30;
+			return 0;
+		} else if (fival->index == 1) {
+			fival->discrete.numerator = 1;
+			fival->discrete.denominator = 60;
+			return 0;
+		}
+		return -EINVAL;
+	}
+	#endif
+
 	//printk( "%s FrameIndex=%d W=%d H=%d  FrameRate=%d \n", __func__,Index,fival->width,fival->height,FrameRate);
 	return 0;
 }
@@ -3269,6 +3327,7 @@ int hws_video_register(struct hws_pcie_dev *dev)
 			goto fail;
 		}
 
+		vdev->dev_parent = &dev->pdev->dev;
 		INIT_WORK(&dev->video[i].videowork,video_data_process);
 		#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,7,0))
 		err = video_register_device(vdev, VFL_TYPE_GRABBER,-1);
