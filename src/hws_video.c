@@ -870,56 +870,38 @@ int hws_vidioc_g_ext_ctrls(struct file *file, void *fh,struct v4l2_ext_controls 
 {
 	struct hws_video *videodev = video_drvdata(file);
 	struct v4l2_ext_controls *ctrl = a;
-	//struct v4l2_queryctrl *found_ctrl = find_ctrl(ctrl->id);
-	int ret = -EINVAL;
-	//int bchs_select=0;
-	if(ctrl ==NULL)
+	unsigned int i;
+
+	if(ctrl ==NULL || ctrl->controls == NULL)
 	{
 		printk( "%s(ch-%d)ctrl=NULL\n", __func__,videodev->index);
-		return ret;
+		return -EINVAL;
 	}
-	//printk( "%s(ch-%d)\n", __func__,videodev->index);
-	switch( ctrl->controls->id ) {
-		case V4L2_CID_BRIGHTNESS: //0x00980900
+	for (i = 0; i < ctrl->count; i++) {
+		struct v4l2_ext_control *c = &ctrl->controls[i];
 
-			//bchs_select = V4L2_BCHS_TYPE_BRIGHTNESS;
-			//adv7619_get_bchs(v4l2m_context->adv7619_handle,&BCHSinfo,bchs_select);
-			ctrl->controls->value = videodev->m_Curr_Brightness;
-			//printk("%s...brightness(%d)\n",__func__,ctrl->value);
-			ret = 0;
+		switch (c->id) {
+		case V4L2_CID_BRIGHTNESS:
+			c->value = videodev->m_Curr_Brightness;
 			break;
-
 		case V4L2_CID_CONTRAST:
-
-			//bchs_select = V4L2_BCHS_TYPE_CONTRAST;
-			//printk("%s...contrast(%d)\n",__func__,bchs_select);
-			ctrl->controls->value = videodev->m_Curr_Contrast;
-			ret = 0;
+			c->value = videodev->m_Curr_Contrast;
 			break;
-
 		case V4L2_CID_SATURATION:
-
-			//bchs_select = V4L2_BCHS_TYPE_SATURATION;
-			//printk("%s...saturation(%d)\n",__func__,bchs_select);
-			ctrl->controls->value = videodev->m_Curr_Saturation;
-			ret = 0;
+			c->value = videodev->m_Curr_Saturation;
 			break;
-
 		case V4L2_CID_HUE:
-
-			//bchs_select = V4L2_BCHS_TYPE_HUE;
-			//printk("%s...hue(%d)\n",__func__,bchs_select);
-			ctrl->controls->value = videodev->m_Curr_Hue;
-			ret = 0;
-			break; //
-		default:
-			ctrl->controls->value =0;
-			printk("control id %d not handled\n", ctrl->controls->id);
+			c->value = videodev->m_Curr_Hue;
 			break;
+		default:
+			ctrl->error_idx = i;
+			c->value = 0;
+			printk("control id %d not handled\n", c->id);
+			return -EINVAL;
+		}
 
 	}
-	//printk("%s...ctrl->value(%d)=%x\n",__func__,bchs_select,ctrl->value);
-	return ret;
+	return 0;
 
 }
 
@@ -927,58 +909,55 @@ int hws_vidioc_s_ext_ctrls(struct file *file, void *fh,struct v4l2_ext_controls 
 {
 	struct hws_video *videodev = video_drvdata(file);
 	struct v4l2_ext_controls *ctrl = a;
-	struct v4l2_query_ext_ctrl *found_ctrl;
-	int ret = -EINVAL;
-	if(ctrl ==NULL)
+	unsigned int i;
+
+	if(ctrl ==NULL || ctrl->controls == NULL)
 	{
 		printk( "%s(ch-%d)ctrl=NULL\n", __func__,videodev->index);
-		return ret;
+		return -EINVAL;
 	}
-	//printk( "%s(ch-%d ctrl->id =%X )\n", __func__,videodev->index,ctrl->id);
-	found_ctrl = find_ctrl(ctrl->controls->id);
-	if( found_ctrl ) {
-		switch( found_ctrl->type ) {
-			case V4L2_CTRL_TYPE_INTEGER:
-				if( ctrl->controls->value >= found_ctrl->minimum
-					|| ctrl->controls->value <= found_ctrl->maximum ) {
-					//printk( "%s(ch-%d ctrl->value =%X )\n", __func__,videodev->index,ctrl->value);
-					switch( ctrl->controls->id ) {
-						case V4L2_CID_BRIGHTNESS:
-							videodev->m_Curr_Brightness = ctrl->controls->value;
-							break;
-						case V4L2_CID_CONTRAST:
-							videodev->m_Curr_Contrast = ctrl->controls->value;
-							break;
-						case V4L2_CID_HUE:
-							videodev->m_Curr_Hue = ctrl->controls->value;
-							break;
-						case V4L2_CID_SATURATION:
-							videodev->m_Curr_Saturation = ctrl->controls->value;
-							break;
+	for (i = 0; i < ctrl->count; i++) {
+		struct v4l2_ext_control *c = &ctrl->controls[i];
+		struct v4l2_query_ext_ctrl *found_ctrl = find_ctrl(c->id);
 
-						default:
-							break;
-					}
-					//printk( "%s(Name:%s value =%X )\n", __func__,found_ctrl->name,ctrl->value);
-					ret = 0;
-					}
-					else
-					{
-						//error
-						ret = -ERANGE;
-						printk("control %s out of range\n", found_ctrl->name);
-					}
-					break;
-						default:
-						{
-							//error
-							printk("control type %d not handled\n", found_ctrl->type);
-						}
+		if (!found_ctrl) {
+			ctrl->error_idx = i;
+			printk("control id %d not handled\n", c->id);
+			return -EINVAL;
+		}
 
+		if (found_ctrl->type != V4L2_CTRL_TYPE_INTEGER) {
+			ctrl->error_idx = i;
+			printk("control type %d not handled\n", found_ctrl->type);
+			return -EINVAL;
+		}
+
+		if (c->value < found_ctrl->minimum || c->value > found_ctrl->maximum) {
+			ctrl->error_idx = i;
+			printk("control %s out of range\n", found_ctrl->name);
+			return -ERANGE;
+		}
+
+		switch (c->id) {
+		case V4L2_CID_BRIGHTNESS:
+			videodev->m_Curr_Brightness = c->value;
+			break;
+		case V4L2_CID_CONTRAST:
+			videodev->m_Curr_Contrast = c->value;
+			break;
+		case V4L2_CID_HUE:
+			videodev->m_Curr_Hue = c->value;
+			break;
+		case V4L2_CID_SATURATION:
+			videodev->m_Curr_Saturation = c->value;
+			break;
+		default:
+			ctrl->error_idx = i;
+			printk("control id %d not handled\n", c->id);
+			return -EINVAL;
 		}
 	}
-	//printk( "%s(ret=%d)\n", __func__,ret);
-	return ret;
+	return 0;
 
 }
 void mem_model_memset(void *s,int c,unsigned int n)
@@ -992,6 +971,10 @@ static int hws_vidioc_query_ext_ctrl(struct file *file, void *fh,struct v4l2_que
 	unsigned int id;
 	unsigned int mask_id;
 	int ret = -EINVAL;
+
+	if (a == NULL)
+		return ret;
+
 	//printk( "%s(ch-%d)\n", __func__,videodev->index);
 	//printk( "%s(ctrl-id=0x%X[0x%X] )\n", __func__,a->id,(a->id)&(~V4L2_CTRL_FLAG_NEXT_CTRL));
 	//-----------------------------------------------
@@ -1003,10 +986,17 @@ static int hws_vidioc_query_ext_ctrl(struct file *file, void *fh,struct v4l2_que
 		{
 			videodev->queryIndex =0;
 			found_ctrl = find_ctrlByIndex(videodev->queryIndex);
-			*a = *found_ctrl;
-			//a->id = a->id|V4L2_CTRL_FLAG_NEXT_CTRL;
-			//printk("queryctrl[1] Get [%s][0x%X]\n",found_ctrl->name,a->id);
-			ret = 0;
+			if (found_ctrl != NULL)
+			{
+				*a = *found_ctrl;
+				//a->id = a->id|V4L2_CTRL_FLAG_NEXT_CTRL;
+				//printk("queryctrl[1] Get [%s][0x%X]\n",found_ctrl->name,a->id);
+				ret = 0;
+			}
+			else
+			{
+				*a = g_no_ctrl;
+			}
 		}
 		else
 		{
