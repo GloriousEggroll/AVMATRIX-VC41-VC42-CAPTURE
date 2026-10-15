@@ -1,0 +1,12 @@
+Package: hws-capture-dkms
+Version: @VERSION@
+Architecture: all
+Maintainer: Nilton OS <jniltinho@gmail.com>
+Depends: dkms, make, gcc
+Recommends: linux-headers-generic
+Section: kernel
+Priority: optional
+Homepage: https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE
+Description: DKMS driver for the AVMATRIX VC41 / VC42 PCI-E capture cards
+ Linux kernel module HwsCapture (HWS 4-channel), built by DKMS
+ for every installed kernel.

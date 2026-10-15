@@ -1,67 +1,48 @@
-Preface:
+# AVMATRIX VC41 / VC42 Linux driver
 
-I am in no way affiliated with AVMATRIX.
+[![Release](https://img.shields.io/github/v/release/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE?color=blue&cacheSeconds=3600)](https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE/releases/latest)
+[![Build .deb](https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE/actions/workflows/build-deb.yml/badge.svg)](https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE/actions/workflows/build-deb.yml)
+[![License: GPL](https://img.shields.io/badge/license-GPL-green)](LICENSE)
 
-I bought this card on Amazon for around $350 because it has the same capabilities as the Magewell Pro Capture Quad HDMI Video Capture Card, and I wanted to see if it held up in comparison. The Magewell card is a $900 card, as opposed to this one. 
+Linux driver (`HwsCapture`) for the **AVMATRIX VC41** (4× 3G-SDI) and **VC42** (4× HDMI) PCIe capture cards,
+up to 1080p60 per channel, with DKMS `.deb` packages for **Ubuntu 24.04 and 26.04**. Each input appears as its own
+V4L2 video device and ALSA audio device, so it works with OBS Studio, vMix-style multi-camera setups, ffmpeg and VLC.
 
-Once I got the card, I found the standard ./install -did not work- on Fedora, and the code was slightly outdated for kernel 6.1. On top of that the drivers were being hosted on OneDrive.. which is sketchy. 
+For the 4K60 VC12-4K card use
+[AVMATRIX-VC12-4K-CAPTURE](https://github.com/GloriousEggroll/AVMATRIX-VC12-4K-CAPTURE).
 
-To add to that, since I also own the Magewell card already, I was able to do a driver comparison, and I found that this company had done a copy/paste of the Magewell driver install bash scripts and just modified them with their own driver sources.  This made porting over the DKMS functionality (and required kernel module signing) much easier!
+![Architecture](doc/architecture.png)
 
-Therefore I updated their drivers for them, pointed out all the things wrong, and sent them an e-mail about it. In the meantime, here is the full driver source, which is has been updated and working on Fedora 37 as of Kernel 6.2. 
+## Install
 
-The license for this project is GPL, as both the AVMATRIX driver -AND- the Magewell driver use GPL:
+Ubuntu 24.04 / 26.04, from the [latest release](https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE/releases/latest):
 
-AVMATRIX:
-```
-$ grep -rni . -e license
-./src/hws_video.c:5794:MODULE_LICENSE("GPL");
-```
-
-Magewell:
-```
-$ grep -rni . -e license
-./src/sources/avstream/capture.c:611:MODULE_LICENSE("GPL");
+```sh
+sudo apt install linux-headers-$(uname -r)
+sudo apt install ./hws-capture-dkms_*ubuntu24.04_all.deb   # or *ubuntu26.04*
 ```
 
-Basic install instructions:
-```
-git clone https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE
-cd AVMATRIX-VC41-VC42-CAPTURE
-./dkms-install.sh
-reboot
+Other distributions (Debian, Fedora, RHEL, openSUSE, Arch, Manjaro): see
+[build from source](doc/README.md#other-distributions-build-from-source).
+
+## Use
+
+```sh
+v4l2-ctl --list-devices   # HVideo 1 … HVideo 4 → /dev/videoN
 ```
 
-Note: Make sure there are no spaces in the directory path or the scripts may fail:
+OBS Studio: one **Video Capture Device (V4L2)** source per input (`HVideo 1` … `HVideo 4`) and one
+**Audio Input Capture (ALSA)** per input (`HAudio 1` … `HAudio 4`).
 
-Good path:
-```
-	/home/someuser/Downloads/AVMATRIX-VC41-VC42-CAPTURE
-```
-Bad path:
-```
-    /home/someuser/Downloads/AVMATRIX VC41 VC42 CAPTURE/
+## Uninstall
+
+```sh
+sudo apt remove hws-capture-dkms     # or: sudo ./scripts/hws-uninstall.sh
 ```
 
-After a successful installation, you should see something similar to:
-```
-========================================================
+## Documentation
 
-Install Successfully!"
-For more information please check the docs directory or"
-contact sales@avmatrix.com"
+[doc/README.md](doc/README.md): hardware details, install options, multi-channel ffmpeg examples, troubleshooting
+(Secure Boot, headers), building the packages, CI and releases, where to buy, history.
 
-========================================================
-```
-NOTE: You must reboot the system for the new driver module to take effect.
-
-To use:
-
-Install obs-studio.
-
-Sources > Video Capture Device (V4L2) > HVideo1 (HWS)
-
-Uninstall:
-```
-$ ./scripts/hws-uninstall.sh
-```
+Not affiliated with AVMATRIX. Licensed under the GPL, see [LICENSE](LICENSE).
