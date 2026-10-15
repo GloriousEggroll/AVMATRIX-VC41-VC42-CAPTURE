@@ -1,6 +1,6 @@
 # AVMATRIX VC41 / VC42 Linux driver
 
-[![Release](https://img.shields.io/github/v/release/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE?color=blue)](https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE/releases/latest)
+[![Release](https://img.shields.io/github/v/release/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE?color=blue&cacheSeconds=3600)](https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE/releases/latest)
 [![Build .deb](https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE/actions/workflows/build-deb.yml/badge.svg)](https://github.com/GloriousEggroll/AVMATRIX-VC41-VC42-CAPTURE/actions/workflows/build-deb.yml)
 [![License: GPL](https://img.shields.io/badge/license-GPL-green)](LICENSE)
 
@@ -22,7 +22,8 @@ sudo apt install linux-headers-$(uname -r)
 sudo apt install ./hws-capture-dkms_*ubuntu24.04_all.deb   # or *ubuntu26.04*
 ```
 
-Other distributions: `./dkms-install.sh` (needs `make`, `gcc`, `dkms` and kernel headers).
+Other distributions (Debian, Fedora, RHEL, openSUSE, Arch, Manjaro): see
+[build from source](doc/README.md#other-distributions-build-from-source).
 
 ## Use
 
