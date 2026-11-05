@@ -90,6 +90,35 @@ To check on a card, per channel:
 - OBS logs the input in "Log status" and follows a source change without restarting the source.
 - A suspend and resume while capturing: capture continues.
 
+## PR 4: capture rework
+
+| VC12-4K | Here | Differences |
+|---|---|---|
+| `cae50c6` copy each half straight into app buffers from a threaded IRQ | `bbc93c7` | Written for this driver: each channel's frame is two halves in its own DMA buffer (`HLAF_SIZE`, then `DWON_SIZE`), not four quarters in four buffers. One kfifo carries {channel, half, time} for all four channels to one IRQ thread; each channel has its own `cap_lock`. Only native-size progressive YUYV is copied straight; YV12/NV12, interlaced, scaled and rotated frames go through a per-channel staging frame and `hws_render_frame()`. The stale-half mark sits where the vendor's copy path put it. Version-0 cards keep counting halves for their software frame rate. |
+| `5bd61fb` probe and remove ordering, error paths, interrupt flags | `082bad0` | All four audio tasklets; the workqueue keeps its name; probe keeps this driver's starting values for the fields the status poll compares with the card's registers. |
+| `fa5b301` debugfs status, DMA check, register snapshots | `b0f32aa` | `status` lists every channel. In `dma` and `regsnaps` the four entries are channels, and register 50 + ch is the first half's length. |
+| `7df0340` (first part) program the input's DMA lengths before capture starts | `f070a2e` | Only that part: the register 9 value and the canary are VC12-4K specific. |
+| `479286e` the card's frame rate when nothing is measured | `2789f0a` | Register 110 is read on the cards this driver's poll already reads it on. |
+| `12e91c5` black frames while the source uses HDCP | `1d80599` | Two halves; register 8 is read only on FPGA versions above 121, as this driver's poll did. |
+| `46f7ec9` 500 µs pause in the start sequence | `c9defca` | None. The pause comes from the VC12-4K's Windows driver. |
+| `96dd3f1` full-range colorimetry | `d7b41b1` | BT.601 encoding at every size, Rec. 709 primaries for HD and SMPTE 170M for SD: the in-kernel `hws` driver's measurement on these cards. The VC12-4K reports a Rec. 709 matrix, measured on that card. |
+| `ddc7606` rate-limited LOG_STATUS | `846d5fb` | None. |
+| `2ef336a` 50 ms input poll | `168632a` | Without the canary scan. |
+| `1f3e39a` silence while the card sends no audio | `10968b9` | Every channel's sound card; debugfs counts per channel. |
+| `c433848` `tests/yrange.py` | `8d59bd0` | None. |
+
+Not ported: `8a67155`, `df0a168`, `bf69f64` (the DMA canary, a VC12-4K investigation tool), the register 9 part of `7df0340`, and `0cf7b5d` (`tests/regprobe.py`, written for VC12-4K register probes).
+
+Build: no new warnings on 7.2.9 to 7.2.11. checkpatch: no new kinds; `hws_video.c` drops to 2,315 errors and 404 warnings.
+
+This is the part most likely to misbehave on real hardware: it replaces how every frame gets from the card to the apps. To check on a card, per channel:
+- `tests/run-baseline.sh /dev/videoN`: about 60 fps, no duplicates, sequence numbers without gaps at a steady source.
+- `/sys/kernel/debug/hws-<pci address>/status`: frames counting up, few lost, no "half queue full".
+- Capture at a scaled size (720p), from an interlaced source, and on a YV12/NV12 board if you have one: these go through the staging path.
+- All channels at once, and stop/start capture repeatedly.
+- `tests/yrange.py` on a few frames: Y should span about 0 to 255 if the card delivers full range.
+- A source change while capturing: no kernel warnings, capture resumes.
+
 ## Unknowns
 
 What the VC12-4K showed and these cards may not:
