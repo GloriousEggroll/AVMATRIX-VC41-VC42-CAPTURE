@@ -98,7 +98,7 @@ Adapt: per-channel state for every channel (D5). Halves, not quarters: "frame en
 - `b8cb4e6` `V4L2_CID_DV_RX_POWER_PRESENT`;
 - `8def62a` the build check against every installed kernel.
 
-Adapt: the DV timings list is bounded by 1920 × 1080 and this driver's mode table. Register 110 (input rate) is read only where `hws` reads it. Interlaced inputs stay supported: these cards deinterlace (`SetDeInterlace`), so timings for interlaced inputs aren't dropped as on the VC12-4K.
+Adapt: the DV timings list is bounded by 1920 × 1080 and this driver's mode table. Register 110 (input rate) is read only where `hws` reads it. This driver delivers interlaced input deinterlaced as progressive frames, as the VC12-4K does, so `4a87a38`'s rule holds here too: list progressive timings, and always accept the live input's own, interlaced or not.
 
 Not ported: `1a794ea` dropping hue (D3).
 

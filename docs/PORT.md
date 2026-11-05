@@ -61,6 +61,35 @@ What the VC12-4K showed before PR 2 (with OBS, the same worker code): ~240 frame
 
 To check on a card, per channel: `tests/run-baseline.sh /dev/videoN` with a 1080p60 source. Expect about 60 fps, no duplicates and no bursts in the framecheck lines, and `v4l2-compliance` finishing. Also capture from two programs at once (two OBS sources on one channel), and from all channels at once, and check each gets every frame once. YV12/NV12 boards and interlaced inputs go through `hws_render_frame()`; a picture that's wrong only there points at it.
 
+## PR 3: input information
+
+| VC12-4K | Here | Differences |
+|---|---|---|
+| `8def62a` build check against every installed kernel | `cdd8952` | Module `HwsCapture`; the default base is `7683b9c`. |
+| `c89526e` unique bus_info, 720×576 mode, no read() | `debe708` | The 720×576 entry was already right here. |
+| `00f59a5` measure the input frame rate | `bf928e9` | Every channel's frame-end interrupt feeds its own measurement. |
+| `ec373f1` picture controls through the control framework | `f8f3a64` | This driver's status poll rewrites register 91 + 2·ch from `m_brightness[ch]` and the others, which were only ever 0x80, so it reset user settings. `s_ctrl` now updates them too. The old handlers removed are this driver's own. |
+| `a9ef468` native size first, followed when idle | `51b15b6` | The VC12-4K's 4K clamps are gone; native sizes are the ones `Get_Video_Status()` accepts (up to 1920×1080, a field counting double). |
+| `c466a2f` real frame intervals, per-consumer rates | `00e7e27` | This driver listed 25/50 or 30/60 fps; it now lists the input's rate divided by 1 to 4. |
+| `5af2e2b` DV timings, signal status, events, log_status | `884334a` | Timings capability: up to 1920×1080 and 165 MHz, not 4K and 600 MHz. Source-change checks for every channel. |
+| `182c304` close a handle's queue before counting it closed | `ae58b90` | None. |
+| `9f6cab6` enumerate and accept only deliverable timings | `6b9c627` | None. |
+| `483648e` re-initialise the card after suspend | `3785e2c` | Resume also calls `SetHardWareInfo()`, which rewrites register 9 on FPGA versions above 121. |
+| `4a87a38` progressive timings only, but accept the input's own | `86623a6` | None; this driver also delivers interlaced input as progressive frames. |
+| `8c7644d` store the live DV timings before the baseline runs | `4e0ba85` | None. |
+| `f3da7f7` frame rate in frame periods | `2c7c078` | None; covers every channel. |
+| `b8cb4e6` signal presence as `V4L2_CID_DV_RX_POWER_PRESENT` | `9216a8a` | A fifth control beside hue; "input signal", since some models are SDI. |
+
+Not ported: `1a794ea`, which drops the hue control because the VC12-4K ignores it. Whether these cards use it is unknown, so it stays.
+
+Build: the five distributions that build the baseline build this; the RHEL family fails with the baseline's errors only. `tests/build-all-kernels.sh` finds no new warnings on 7.2.9 to 7.2.11. With `W=1` there is one: `framegrabber_support_refreshrate` is unused after `00e7e27`, as it was on the VC12-4K, until part 5's cleanup removes it. checkpatch: no new kinds; `hws_video.c` drops to 2,600 errors and 422 warnings.
+
+To check on a card, per channel:
+- `v4l2-ctl -d /dev/videoN --query-dv-timings` shows the source's mode and measured rate (59.94 and 60 told apart after about a second of capture); `--list-formats-ext` lists the input's size first.
+- `v4l2-ctl --set-ctrl brightness=200` changes the picture and stays changed (it used to reset within a second); `hue` may or may not do anything.
+- OBS logs the input in "Log status" and follows a source change without restarting the source.
+- A suspend and resume while capturing: capture continues.
+
 ## Unknowns
 
 What the VC12-4K showed and these cards may not:
