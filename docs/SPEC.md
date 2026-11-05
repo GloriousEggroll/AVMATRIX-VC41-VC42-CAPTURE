@@ -137,14 +137,12 @@ Ported:
 - `a4311ca` stop video DMA with a readback before releasing buffers;
 - `07860d0` stop the engine for an input-size change while capturing;
 - `f3c5ded` drop stale audio packets after an audio start (unknown whether these cards send them; dropping two 21 ms packets is harmless if they don't);
-- `583a751` the stale bottom-half test knob;
 - `0f2c6c7`, `aeeb157`, `d4f6c40`, `0499165` dead code and include cleanup;
-- `d7cea32` source-only DKMS installs in `tools/dkms-install.sh`;
 - test scripts that don't depend on the VC12-4K: `4e12ea3` (switch test, restart counter), `87c6930`, `7b4c70a`, `b9f1c2c`, `1fdf4cb`, `e88d445`, `9dda857`.
 
-Also, from `hws`: probe only the channels the PCI ID has ("only init channels the device actually has").
+The in-kernel `hws` fix "only init channels the device actually has" was checked: this driver already sets up and tears down per-channel devices and controls for the same channel count, so there is nothing to port.
 
-Not ported: `d6e23f9`, `f772cef`, `8fa4801` (zero-copy, D2); `ff93168` and `ace5f67` (VC12-4K GPU-capture tests).
+Not ported: `d6e23f9`, `f772cef`, `8fa4801` (zero-copy, D2); `583a751` (a knob for testing a zero-copy fix); `d7cea32` (changes a VC12-4K developer install script that isn't ported); `ff93168` and `ace5f67` (VC12-4K GPU-capture tests).
 
 ### PR 6: installer, CI and docs (VC12 #32)
 

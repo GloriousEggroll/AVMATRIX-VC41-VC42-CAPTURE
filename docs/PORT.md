@@ -109,7 +109,7 @@ To check on a card, per channel:
 
 Not ported: `8a67155`, `df0a168`, `bf69f64` (the DMA canary, a VC12-4K investigation tool), the register 9 part of `7df0340`, and `0cf7b5d` (`tests/regprobe.py`, written for VC12-4K register probes).
 
-Build: no new warnings on 7.2.9 to 7.2.11. checkpatch: no new kinds; `hws_video.c` drops to 2,315 errors and 404 warnings.
+Build: the five distributions that build the baseline build this; the RHEL family fails with the baseline's errors only. No new warnings on 7.2.9 to 7.2.11. checkpatch: no new kinds; `hws_video.c` drops to 2,315 errors and 404 warnings.
 
 This is the part most likely to misbehave on real hardware: it replaces how every frame gets from the card to the apps. To check on a card, per channel:
 - `tests/run-baseline.sh /dev/videoN`: about 60 fps, no duplicates, sequence numbers without gaps at a steady source.
@@ -118,6 +118,51 @@ This is the part most likely to misbehave on real hardware: it replaces how ever
 - All channels at once, and stop/start capture repeatedly.
 - `tests/yrange.py` on a few frames: Y should span about 0 to 255 if the card delivers full range.
 - A source change while capturing: no kernel warnings, capture resumes.
+
+## PR 5: audit fixes
+
+| VC12-4K | Here | Differences |
+|---|---|---|
+| `af7a1eb` DMA checks behind `debug_dma` | `3a37e7d` | Only the register snapshots; there is no canary. |
+| `9a7d8c0` no re-init from the atomic PCM trigger | `eca8f8a` | The re-init holds every channel's `engine_lock` and `cap_lock`, in channel order; no zero-copy to move back. |
+| `60ed9a7` no audio into a stopped stream; SUSPEND as STOP | `1f6f3c3` | Covers each channel's sound card. |
+| `fed9220` unregister before teardown, free on last close | `e0ae06b` | Every channel's video device and sound card holds a reference. |
+| `6e4fd45` stop the status thread on probe failure | `20403c4` | None. |
+| `ae6e63e` acknowledge exactly the interrupt bits that are set | `0353598` | Eight known sources (video 0-3, audio 8-11) instead of two. The untested-model warning isn't ported. |
+| `693863f` bounded busy wait after stop | `00ea544` | None. |
+| `1382cf8` freezable status thread | `8fbb15f` | None. |
+| `41c0d63` an all-ones register 8 isn't HDCP | `13ae698` | Combined with the FPGA-version gate. |
+| `e02e347` Relaxed Ordering left to the PCI core | `4728f90` | None. |
+| `dd669a0` no DMA sync calls on coherent buffers | `bfc9b60` | One buffer per channel. |
+| `8377ac9` fail a frame whose half may have been overwritten | `4009bd5` | The half-frame interval is measured per channel, not taken from zero-copy. |
+| `78484d4` wake blocked readers on removal | `92004bc` | None. |
+| `4a07d5e` recover a card that lost its run state | `e42845f` | Checks every channel. |
+| `a4311ca` stop video DMA with a readback | `a75c3e8` | Without the zero-copy stop timeout; remove quiesces every channel. |
+| `07860d0` restart the engine on every input-size change | `fd223f0` | Per channel, with the restart counter from `4e12ea3`. |
+| `4e12ea3`, `87c6930`, `7b4c70a`, `b9f1c2c`, `1fdf4cb` `switchtest.sh` and `framecheck.py` | `d6e12ec` | One commit; one channel at a time (`CH=n`), the card found through sysfs, no zero-copy reporting. |
+| `f3c5ded` drop the stale audio packets after a start | `0acde0c` | Per channel. |
+| `e88d445`, `9dda857` `soak.sh` | `126435d`, `ac5f84f`, `154b35c` | Adapted in `154b35c`: one channel, no zero-copy or stray-write columns. |
+| `0f2c6c7` remove the unused per-device vb2 queue | `c315596` | None. |
+| `aeeb157` remove unused fields, tables, locals | `eebded8` | The scaler it touched doesn't exist here. |
+| `d4f6c40` remove `#if 0`, unwrap `#if 1` | `599c620` | This driver's sixteen blocks, by the same kind of script. |
+| `0499165` drop unused and repeated includes | `c1804bb` | None. |
+
+Not ported:
+- `d6e23f9`, `f772cef`, `8fa4801`: zero-copy.
+- `583a751`: a debug knob for testing the zero-copy 6.11 fix.
+- `d7cea32`: it changes `tools/dkms-install.sh`, a developer install script from the VC12-4K's part 4 (`a9b2cef`) that isn't ported; part 6's `install.sh` copies only the sources.
+- `ff93168`, `ace5f67`: tests for the VC12-4K's GPU-capture issue.
+
+The in-kernel `hws` fix "only init channels the device actually has" has no counterpart here: this driver already sets up and tears down per-channel devices and controls for the same channel count.
+
+Build: no new warnings on 7.2.9 to 7.2.11; `W=1` is down to 24 warnings from 51 at the baseline. checkpatch: no new kinds; `hws_video.c` drops to 2,160 errors and 342 warnings.
+
+To check on a card:
+- unbind or unload the driver while OBS captures from it: the programs get an error and exit, the kernel log shows no oops;
+- suspend and resume while capturing and while recording audio;
+- `tests/switchtest.sh 1920 1080` with `CH=n` per channel while switching the source's resolution;
+- `tests/soak.sh` for a long session with OBS;
+- the debugfs status file's "other sources" count: should stay 0 (a nonzero value names interrupt bits this driver doesn't know).
 
 ## Unknowns
 

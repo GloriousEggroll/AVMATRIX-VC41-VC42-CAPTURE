@@ -22,56 +22,41 @@
 #include <sound/core.h>
 #include <sound/control.h>
 #include <sound/pcm.h>
-#include <sound/opl3.h>
 
 #include <linux/kernel.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
 #include <linux/sched.h>
-#include <linux/timer.h>
 #include <linux/kthread.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
-#include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
-#include <linux/uio_driver.h>
 #include <linux/spinlock.h>
-#include <linux/uio_driver.h>
 #include <linux/platform_device.h>
 #include <asm/io.h>
-#include <linux/delay.h>
 #include <linux/uaccess.h>
 #include <linux/types.h>
-#include <linux/module.h>
-#include <linux/cdev.h>
 #include <linux/dma-mapping.h>
-#include <linux/delay.h>
-#include <linux/fb.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
-#include <linux/jiffies.h>
-#include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/mm_types.h>
 #include <linux/poll.h>
-#include <linux/sched.h>
-#include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
-#include <linux/aio.h>
 #include <linux/splice.h>
 #include <linux/version.h>
 #include <linux/uio.h>
 #include <linux/ioctl.h>
-#include <linux/delay.h>
 #include <linux/semaphore.h>   
-#include <linux/sched.h>    
 #include <linux/wait.h>
 #include <linux/kfifo.h>
 #include <linux/debugfs.h>
+#include <linux/kref.h>
+#include <linux/freezer.h>
 
 
 //---------------------------------------------
@@ -109,6 +94,7 @@
 #define PCI_E_BAR_ADD_LOWMASK 0x1FFFFFFF
 
 #define MAX_DMA_AUDIO_PK_SIZE      128*16*2
+#define HWS_AUDIO_STALE_PKTS       2	/* old packets the card sends after an audio enable */
 
 #ifndef TRUE
 #define TRUE 1
@@ -158,12 +144,6 @@ typedef unsigned char BOOL;
 #define MAX_VIDEO_HW_H 1080
 #define MAX_VIDEO_SCLAER_SIZE 1920*1080*2
 
-struct TMemParam
-{
-	DWORD   dwIndex;
-	DWORD   dwType;
-	DWORD   dwStatus;
-};
 typedef struct tagDATA_BUFFER_MSG
 {
 	DWORD dwHandle;
@@ -266,19 +246,6 @@ typedef struct tagVIDEO_INFO
 }VIDEO_INFO,*PVIDEO_INFO;
 
 
-#define DVRS_HW_IOC_MAGIC	'd'
-enum DVRS_HW_TYPES {
-	IOCTL_DVRS_MAP_DATA_BUFFER,
-	IOCTL_DVRS_MAP_START_DMA,
-	IOCTL_DVRS_MAP_STOP_DMA,
-	IOCTL_DVRS_MAP_GET_CAPTURE,
-	IOCTL_DVRS_MAP_SET_FORMATE
-};
-#define DVRS_HW_IOCDATABUFFER		_IOWR(DVRS_HW_IOC_MAGIC, IOCTL_DVRS_MAP_DATA_BUFFER, struct TMemParam)
-#define DVRS_HW_IOCSTART_DMA	_IOWR(DVRS_HW_IOC_MAGIC, IOCTL_DVRS_MAP_START_DMA,		 struct TMemParam)
-#define DVRS_HW_IOCSTOP_DMA	   _IOWR(DVRS_HW_IOC_MAGIC, IOCTL_DVRS_MAP_STOP_DMA,		 struct TMemParam)
-#define DVRS_HW_IOCGET_CAPUTURE  _IOWR(DVRS_HW_IOC_MAGIC, IOCTL_DVRS_MAP_GET_CAPTURE,	 struct TMemParam)
-#define DVRS_HW_IOCSET_FORMATE  _IOWR(DVRS_HW_IOC_MAGIC, IOCTL_DVRS_MAP_SET_FORMATE,	 struct TMemParam)
 
 //--------------------
 
@@ -345,21 +312,13 @@ struct hws_video{
 	struct hws_pcie_dev		*dev;
 	struct v4l2_device		v4l2_dev;
 	struct video_device		vdev;
-	struct vb2_queue		vq;
-	struct list_head		queue;
 	int                     fileindex;
-	int                     startstreamIndex;
-	unsigned				seqnr;
-	struct mutex			video_lock;
-	struct mutex			queue_lock;
 	/* B1: multi-consumer */
 	spinlock_t			consumers_lock;
 	struct mutex			ioctl_lock;	/* non-buffer ioctls (shared format/state) */
 	struct mutex			engine_lock;	/* StartVideoCapture/StopVideoCapture */
 	struct list_head		consumers;
 	atomic_t			engine_users;
-	spinlock_t				slock;
-	v4l2_std_id				std;  //V4L2_STD_NTSC_M
 	u32						pixfmt; //V4L2_PIX_FMT_YUYV(fourcc)
 	int						index;
 	/*
@@ -375,6 +334,11 @@ struct hws_video{
 	int						frame_len[2];	/* bytes in each half (HLAF_SIZE, DWON_SIZE) */
 	bool					frame_hdcp;	/* HDCP was active at this frame's first half */
 	bool					hdcp_active;	/* last HDCP state the status thread logged */
+	u64						last_half_ts;	/* interrupt time of the previous half */
+	u64						half_gap;	/* time between the last two halves: about half a frame */
+	bool					frame_late;	/* the first half's copy ended late (hws_copy_late) */
+	u32						late_copies;	/* frames failed for a late copy (debugfs) */
+	u32						size_restarts;	/* engine restarts for an input-size change (debugfs) */
 	int						Interlaced;
 	//------------------------
 	struct v4l2_ctrl_handler ctrl_hdl;
@@ -391,9 +355,7 @@ struct hws_video{
 	//------------------------
 	int current_out_width;
 	int curren_out_height;
-	int current_out_framerate;
 	int current_out_pixfmt;
-	int current_out_size_index;
 };
 	
 struct hws_audio{
@@ -444,6 +406,7 @@ struct hws_pcie_dev {
 	/* debugfs */
 	struct dentry *dbg;
 	u32 irq_total, irq_video, irq_audio, irq_fifo_full;	/* updated only by irqhandler */
+	u32 irq_unknown, irq_unknown_bits;	/* interrupt sources other than the channels' video and audio bits */
 	spinlock_t snap_lock;
 	struct hws_regsnap snaps[HWS_REGSNAPS];
 	u32 snap_next;
@@ -495,9 +458,7 @@ struct hws_pcie_dev {
 	dma_addr_t   		m_pbyAudio_phys[MAX_VID_CHANNELS] ;
 	uint8_t     *m_pbyAudioBuffer[MAX_VID_CHANNELS];
 	uint8_t		*m_pbyUserAudioBuffer[MAX_VID_CHANNELS];
-	uint8_t     *m_pAudioData[MAX_VID_CHANNELS];
 	uint8_t     *m_pbyAudioBuffer_area[MAX_VID_CHANNELS];
-	uint8_t     *m_pAudioData_area[MAX_VID_CHANNELS];
 	uint8_t		m_bBufferAllocate;
 	u32		m_dwAudioBuffer[MAX_VID_CHANNELS];
 	u32		m_dwAudioBufferHigh[MAX_VID_CHANNELS];
@@ -512,14 +473,17 @@ struct hws_pcie_dev {
 	u64       m_RateMinDeltaNs[MAX_VID_CHANNELS];	/* shortest frame interval in the window */
 	u64       m_FrameIntervalNs[MAX_VID_CHANNELS];	/* last measured, 0 = unknown */
 	u64       m_RateUpdatedNs[MAX_VID_CHANNELS];	/* when m_FrameIntervalNs was last written */
-	uint8_t   m_ResumeVideo[MAX_VID_CHANNELS];	/* capture state saved across system sleep */
-	uint8_t   m_ResumeAudio[MAX_VID_CHANNELS];
+	struct kref ref;	/* see hws_dev_release() */
+	bool      m_Removed;	/* remove() unmapped BAR0 */
+	int       m_NeedReinit;	/* set by hws_request_reinit(), handled by the status thread */
+	uint8_t   m_ResumeVideo[MAX_VID_CHANNELS];	/* video capture state saved across system sleep; ALSA restarts audio */
 	uint8_t	  m_dwAudioField[MAX_VID_CHANNELS];
 	uint8_t   m_nAudioBusy[MAX_VID_CHANNELS];
 	uint8_t   m_nAudioBufferIndex[MAX_VID_CHANNELS];
 	uint8_t	  m_pAudioEvent[MAX_VID_CHANNELS];
 	uint8_t m_bAudioRun[MAX_VID_CHANNELS];
 	uint8_t m_bAudioStop[MAX_VID_CHANNELS];
+	uint8_t m_AudioSkip[MAX_VID_CHANNELS];	/* stale packets still to drop */
 	int       m_nRDAudioIndex[MAX_VID_CHANNELS];
 	u32       m_dwAudioPTKSize;
 	//-----------------------------
