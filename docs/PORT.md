@@ -155,7 +155,7 @@ Not ported:
 
 The in-kernel `hws` fix "only init channels the device actually has" has no counterpart here: this driver already sets up and tears down per-channel devices and controls for the same channel count.
 
-Build: no new warnings on 7.2.9 to 7.2.11; `W=1` is down to 24 warnings from 51 at the baseline. checkpatch: no new kinds; `hws_video.c` drops to 2,160 errors and 342 warnings.
+Build: the five distributions that build the baseline build this; the RHEL family fails with the baseline's errors only. No new warnings on 7.2.9 to 7.2.11; `W=1` is down to 24 warnings from 51 at the baseline. checkpatch: no new kinds; `hws_video.c` drops to 2,160 errors and 342 warnings.
 
 To check on a card:
 - unbind or unload the driver while OBS captures from it: the programs get an error and exit, the kernel log shows no oops;
@@ -163,6 +163,28 @@ To check on a card:
 - `tests/switchtest.sh 1920 1080` with `CH=n` per channel while switching the source's resolution;
 - `tests/soak.sh` for a long session with OBS;
 - the debugfs status file's "other sources" count: should stay 0 (a nonzero value names interrupt bits this driver doesn't know).
+
+## PR 6: installer, CI and docs
+
+| VC12-4K | Here | Differences |
+|---|---|---|
+| `d3f0412` `.gitignore`, `ccflags-y`, no `src/load.sh` | `12c68a0` | None. |
+| `bff3f78` probe tools check the device first | `1d45e03` | Only the `BDF=` check in `switchtest.sh` and `soak.sh`; the register-probe tool isn't ported. |
+| `3be8a4d` pure calculations into `hws_calc.h` | `ea4714e` | `hws_half_sizes()` for this driver's three output formats replaces the quarter-size and zero-copy helpers. |
+| `8ade178` unit tests under ASan and UBSan | `df9db22` | Half sizes for every size up to 1920×1080 in each format; no scaler tests (the scalers didn't move to their own file here). |
+| `f4732c7` detect backported kernel APIs | `7710db7` | Without the dma-contig part (zero-copy only). |
+| `38c1b72` CI against nine distributions | `7394393` | This driver's module name and files. |
+| `8fef480`, `d210a33`, `e3722c2`, `89749a5` installer and uninstaller | `a4b8c3a` | One commit; plus the `hws` blacklist (`/etc/modprobe.d/hws-capture.conf`). |
+| `bab04c4`, `89749a5` README as a user guide | `e8801eb` | With a "Status of this version" section, the `hws` overlap, and the per-input device names. |
+| `e2d598a` changelog and security policy | `df686ae` | No release notes: a release is the repository owner's call. |
+
+Not ported: `04b43fe` and `8ca8a40` (moving the VC12-4K's scalers into their own file, and dropping one broken 4K scaler that doesn't exist here), `a9b2cef` (a developer install tool), and the VC12-4K's results and release-check records.
+
+Build: all nine distributions build, including CentOS Stream and AlmaLinux 9 and 10, which fail on `main`. `make -C tests/unit check` passes under ASan and UBSan, and fails if `hws_half_sizes()` is broken. shellcheck passes on every script except the vendor's `play/` demos.
+
+Install: `install.sh` and `uninstall.sh` were run in a Fedora 44 container from a path with a space. The install built and installed the module through DKMS, wrote the `hws` blacklist and named the missing kernel modules (the container has none); nothing was written in the working tree. The uninstall removed the DKMS package, the sources, the module, the blacklist and planted leftovers of the old installers. Secure Boot and module loading couldn't be tested in a container.
+
+To check on a machine with a card: follow the README from a fresh clone, with and without Secure Boot; check that `hws` doesn't take the card after a reboot; then `./uninstall.sh`, reboot, and check that `hws` does.
 
 ## Unknowns
 
@@ -176,3 +198,4 @@ What the VC12-4K showed and these cards may not:
 - interlaced input after the capture rework;
 - the NV12 path on boards that report `support_yv12`;
 - which PCI IDs are the VC41 and which the VC42.
+- whether the in-kernel `hws` driver and this one behave the same at boot when both are installed and the blacklist is removed.

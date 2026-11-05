@@ -485,7 +485,7 @@ static int hws_open(struct file *file)
     v4l2_fh_init(&ctx->fh, &videodev->vdev);
     file->private_data = &ctx->fh;
 
-	#if (LINUX_VERSION_CODE < KERNEL_VERSION(6,18,0))
+	#ifndef HWS_FH_TAKES_FILE	/* see src/Makefile */
 	v4l2_fh_add(&ctx->fh);
 	#else
 	v4l2_fh_add(&ctx->fh, file);
@@ -504,16 +504,16 @@ static int hws_open(struct file *file)
     q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC | V4L2_BUF_FLAG_TSTAMP_SRC_EOF;
     /*
      * Per-open lock for this queue only. vb2 releases it while a blocking
-     * DQBUF waits (via wait_prepare/wait_finish before 7.0, by itself since),
-     * which the pre-7.0 ops also need: they unlock q->lock and must not see
-     * NULL.
+     * DQBUF waits: through wait_prepare/wait_finish where vb2_ops still has
+     * them, which unlock q->lock and so must not see NULL, and by itself
+     * otherwise.
      */
     q->lock = &ctx->qmutex;
     q->dev = &pdx->pdev->dev;
 
     ret = vb2_queue_init(q);
     if (ret) {
-		#if (LINUX_VERSION_CODE < KERNEL_VERSION(6,18,0))
+		#ifndef HWS_FH_TAKES_FILE	/* see src/Makefile */
 		v4l2_fh_del(&ctx->fh);
 		#else
 		v4l2_fh_del(&ctx->fh, file);
@@ -582,7 +582,7 @@ static int hws_release(struct file *file)
     spin_unlock_irqrestore(&pdx->videoslock[videodev->index], flags);
 
     /* v4l2 fh cleanup */
-	#if (LINUX_VERSION_CODE < KERNEL_VERSION(6,18,0))
+	#ifndef HWS_FH_TAKES_FILE	/* see src/Makefile */
 	v4l2_fh_del(&ctx->fh);
 	#else
 	v4l2_fh_del(&ctx->fh, file);
@@ -777,8 +777,9 @@ static int hws_query_timings(struct hws_video *videodev, struct v4l2_dv_timings 
 {
 	struct hws_pcie_dev *pdx = videodev->dev;
 	struct v4l2_fract tpf, ptpf;
-	u64 want_ns, best_err = U64_MAX, err;
-	int w, h, il, i, best = -1;
+	u64 want_ns, cand_ns[16];
+	int cand[16], n = 0;
+	int w, h, il, i, best;
 	u32 st;
 
 	if (!hws_read_input(pdx, videodev->index, &w, &h, &il)) {
@@ -792,20 +793,18 @@ static int hws_query_timings(struct hws_video *videodev, struct v4l2_dv_timings 
 	}
 	want_ns = hws_tpf_ns(&tpf);
 
-	for (i = 0; v4l2_dv_timings_presets[i].bt.width; i++) {
+	/* the presets with this size (a handful), then the closest rate within 1% */
+	for (i = 0; v4l2_dv_timings_presets[i].bt.width && n < ARRAY_SIZE(cand); i++) {
 		const struct v4l2_bt_timings *bt = &v4l2_dv_timings_presets[i].bt;
 		if (bt->width != w || bt->height != h || !!bt->interlaced != !!il)
 			continue;
 		ptpf = v4l2_calc_timeperframe(&v4l2_dv_timings_presets[i]);
-		err = hws_tpf_ns(&ptpf);
-		err = err > want_ns ? err - want_ns : want_ns - err;
-		if (err < best_err) {
-			best_err = err;
-			best = i;
-		}
+		cand[n] = i;
+		cand_ns[n++] = hws_tpf_ns(&ptpf);
 	}
-	if (best >= 0 && best_err * 100 <= want_ns) {	/* within 1% */
-		*t = v4l2_dv_timings_presets[best];
+	best = hws_closest_interval(cand_ns, n, want_ns);
+	if (best >= 0) {
+		*t = v4l2_dv_timings_presets[cand[best]];
 		return 0;
 	}
 	memset(t, 0, sizeof(*t));
@@ -1291,7 +1290,7 @@ static const struct vb2_ops hwspcie_video_multi_qops = {
     .queue_setup    = hws_queue_setup_multi,
     .buf_prepare    = hws_buffer_prepare_multi,
     .buf_queue      = hws_buffer_queue_multi,
-    #if (LINUX_VERSION_CODE < KERNEL_VERSION(7,0,0))
+    #ifndef HWS_VB2_NO_WAIT_PREPARE	/* see src/Makefile */
     .wait_prepare   = vb2_ops_wait_prepare,
     .wait_finish    = vb2_ops_wait_finish,
     #endif
@@ -3644,11 +3643,11 @@ int hws_audio_register(struct hws_pcie_dev *dev)
 		snd_pcm_lib_preallocate_pages_for_all(
 			pcm,
 			SNDRV_DMA_TYPE_CONTINUOUS,
-			#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,1,0))
-			card->dev,
-			#else
+			#ifdef snd_dma_continuous_data	/* a macro until 5.19; RHEL 9.10 drops it too */
 			snd_dma_continuous_data(GFP_KERNEL),
-											  #endif
+			#else
+			card->dev,
+			#endif
 											  audio_pcm_hardware.buffer_bytes_max,
 										audio_pcm_hardware.buffer_bytes_max
 		);
@@ -3809,30 +3808,12 @@ static int SetVideoFormteSize(struct hws_pcie_dev *pdx,int ch,int w,int h)
 	//int frame_size;
 	//int buf_cnt;
 
-	if(pdx->m_Device_SupportYV12 ==0)
-	{
-		hf_size = (w*h)/(16*128);
-		hf_size = hf_size*16*128;
-		down_size = (w*h*2)-hf_size;
-	}
-	else if(pdx->m_Device_SupportYV12 ==1)
-	{
-		hf_size = (w*h*12)/(16*16*128);
-		hf_size = hf_size*16*128;
-		down_size = ((w*h*12)/8)-hf_size;
-	}
-	else
-	{
-		hf_size = (w*h*5)/(8*16*128);
-		hf_size = hf_size*16*128;
-		down_size = ((w*h*5)/4)-hf_size;
-	}
 	/*
 	 * The card DMAs both halves of a frame into the channel's buffer, whose
 	 * last MAX_AUDIO_CAP_SIZE bytes hold the audio ring. A frame that does
 	 * not fit would be written past the buffer, so never program it.
 	 */
-	if(hf_size < 0 || down_size < 0 ||
+	if(hws_half_sizes(w, h, pdx->m_Device_SupportYV12, &hf_size, &down_size) < 0 ||
 	   hf_size + down_size > pdx->m_MaxHWVideoBufferSize - MAX_AUDIO_CAP_SIZE)
 	{
 		return -1;
@@ -4455,27 +4436,11 @@ static void DpcForIsr_Audio3(unsigned long data)
  */
 static void hws_frame_end(struct hws_pcie_dev *pdx, int ch, u64 now)
 {
-	u64 prev = pdx->m_FrameEndNs[ch];
-	u64 elapsed, d, unit;
+	u64 iv = hws_rate_frame_end(&pdx->m_RateWin[ch], now);
 
-	pdx->m_FrameEndNs[ch] = now;
-	if (!prev || now - prev > 200 * NSEC_PER_MSEC || !pdx->m_RateWinStartNs[ch]) {
-		pdx->m_RateWinStartNs[ch] = now;
-		pdx->m_RateWinFrames[ch] = 0;
-		pdx->m_RateMinDeltaNs[ch] = 0;
-		return;
-	}
-	d = now - prev;
-	if (!pdx->m_RateMinDeltaNs[ch] || d < pdx->m_RateMinDeltaNs[ch])
-		pdx->m_RateMinDeltaNs[ch] = d;
-	unit = pdx->m_RateMinDeltaNs[ch];
-	pdx->m_RateWinFrames[ch] += max_t(u32, 1, (u32)div64_u64(d + unit / 2, unit));
-	elapsed = now - pdx->m_RateWinStartNs[ch];
-	if (elapsed >= NSEC_PER_SEC) {
-		WRITE_ONCE(pdx->m_FrameIntervalNs[ch], div_u64(elapsed, pdx->m_RateWinFrames[ch]));
+	if (iv) {
+		WRITE_ONCE(pdx->m_FrameIntervalNs[ch], iv);
 		WRITE_ONCE(pdx->m_RateUpdatedNs[ch], now);
-		pdx->m_RateWinStartNs[ch] = now;
-		pdx->m_RateWinFrames[ch] = 0;
 	}
 }
 
@@ -4500,16 +4465,10 @@ static u32 hws_hw_fps(struct hws_pcie_dev *pdx, int ch)
  */
 static bool hws_input_timeperframe(struct hws_pcie_dev *pdx, int ch, struct v4l2_fract *tpf)
 {
-	static const struct v4l2_fract standard[] = {
-		{ 1001, 24000 }, { 1, 24 }, { 1, 25 }, { 1001, 30000 }, { 1, 30 },
-		{ 1, 50 }, { 1001, 60000 }, { 1, 60 }, { 1, 100 }, { 1001, 120000 },
-		{ 1, 120 }, { 1, 144 }, { 1, 240 },
-	};
 	u64 meas = READ_ONCE(pdx->m_FrameIntervalNs[ch]);
 	u64 at = READ_ONCE(pdx->m_RateUpdatedNs[ch]);
-	u64 best_err = U64_MAX, std;
 	u32 fps, tol = 200;	/* 1/200 = 0.5% */
-	int i, best = -1;
+	int i;
 
 	if (!meas || !pdx->m_bVCapStarted[ch] || ktime_get_ns() - at > 2 * NSEC_PER_SEC) {
 		fps = hws_hw_fps(pdx, ch);
@@ -4520,16 +4479,10 @@ static bool hws_input_timeperframe(struct hws_pcie_dev *pdx, int ch, struct v4l2
 			return false;
 		}
 	}
-	for (i = 0; i < ARRAY_SIZE(standard); i++) {
-		std = div_u64((u64)standard[i].numerator * NSEC_PER_SEC, standard[i].denominator);
-		if ((meas > std ? meas - std : std - meas) < best_err) {
-			best_err = meas > std ? meas - std : std - meas;
-			best = i;
-		}
-	}
-	if (best >= 0 && best_err * tol <= div_u64((u64)standard[best].numerator * NSEC_PER_SEC,
-						    standard[best].denominator)) {
-		*tpf = standard[best];
+	i = hws_snap_interval(meas, tol);
+	if (i >= 0) {
+		tpf->numerator = hws_std_intervals[i][0];
+		tpf->denominator = hws_std_intervals[i][1];
 	} else {
 		tpf->numerator = (u32)div_u64(meas, 1000);	/* microseconds */
 		tpf->denominator = 1000000;
@@ -5758,7 +5711,7 @@ static int hws_resume(struct device *d)
 	pdx->m_bStartRun = 0;
 	InitVideoSys(pdx, 0);
 	for (i = 0; i < pdx->m_nCurreMaxVideoChl; i++) {
-		pdx->m_FrameEndNs[i] = 0;	/* restart the frame-rate window */
+		pdx->m_RateWin[i].frame_end = 0;	/* restart the frame-rate window */
 		if (pdx->m_ResumeVideo[i]) {
 			pdx->m_bVCapStarted[i] = 0;
 			StartVideoCapture(pdx, i);
@@ -5801,4 +5754,4 @@ module_exit(pcie_hws_exit);
 MODULE_DESCRIPTION("HWS driver");
 MODULE_AUTHOR("Sales <sales@avmatrix.com>");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0");
+MODULE_VERSION(HWS_VERSION);	/* PACKAGE_VERSION in dkms.conf, see src/Makefile */
