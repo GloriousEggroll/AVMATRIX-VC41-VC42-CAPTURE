@@ -1,3 +1,8 @@
+> [!WARNING]
+> **This repository is deprecated and no longer maintained.** Use [HWS_VIDEO_CAPTURE_GENERIC](https://github.com/GloriousEggroll/HWS_VIDEO_CAPTURE_GENERIC) instead. Its `hwsvideo` driver replaces this one and supports the same cards.
+>
+> To switch, follow its [install steps](https://github.com/GloriousEggroll/HWS_VIDEO_CAPTURE_GENERIC#install). Its `install.sh` removes this driver for you. Any `options HwsCapture ...` line in `/etc/modprobe.d/hws.conf` must change to `options hwsvideo ...`.
+
 # AVMatrix VC41/VC42 capture card driver for Linux
 
 This driver runs AVMatrix's multi-channel PCIe capture cards (the VC41, VC42 and related models), each with one, two or four inputs at up to 1920×1080 at 60 Hz, with their stereo audio. For each input it gives you:
